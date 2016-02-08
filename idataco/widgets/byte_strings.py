@@ -1,6 +1,6 @@
 #!/usr/bin/python
 ########################################################################
-# Copyright (c) 2015
+# Copyright (c) 2015-2016
 # Jason Jones <jason<at>jasonjon<dot>es>
 # All rights reserved.
 ########################################################################
@@ -23,15 +23,15 @@
 #
 ########################################################################
 
-import ctypes
 import re
-from PySide import QtGui, QtCore
+import ctypes
 
+import idataco.util.qt as qt
 from . import TacoTabWidget
 
-import idaapi
 import idc
 import idautils
+import idaapi
 
 import logging
 
@@ -42,17 +42,18 @@ class TacoByteStrings(TacoTabWidget):
 
     name = "Byte Strings"
     short_name = "byte_strings"
+    description = """ Attempt to find all byte / stack strings in a selected executable. """
 
     def initVars(self):
         self.byte_strings = {}
-        self._bytestring_table = QtGui.QTableWidget()
+        self._bytestring_table = qt.qtablewidget()()
         self._bytestring_table.setRowCount(1)
         self._bytestring_table.setColumnCount(3)
         self._bytestring_table.setHorizontalHeaderLabels(("Address", "Function", "String"))
-        self._clipboard = QtGui.QClipboard()
+        self._clipboard = qt.qclipboard()
 
     def initLayout(self):
-        layout = QtGui.QVBoxLayout()
+        layout = qt.qvboxlayout()()
         layout.addWidget(self._bytestring_table)
         self.setLayout(layout)
 
@@ -79,9 +80,9 @@ class TacoByteStrings(TacoTabWidget):
         self._bytestring_table.setRowCount(len(self.byte_strings.keys()))
         row = 0
         for addr, bstr in self.byte_strings.items():
-            self._bytestring_table.setItem(row, 0, QtGui.QTableWidgetItem(addr))
-            self._bytestring_table.setItem(row, 1, QtGui.QTableWidgetItem(idaapi.get_func_name(int(addr[2:], 16))))
-            self._bytestring_table.setItem(row, 2, QtGui.QTableWidgetItem(bstr))
+            self._bytestring_table.setItem(row, 0, qt.qtablewidgetitem()(addr))
+            self._bytestring_table.setItem(row, 1, qt.qtablewidgetitem()(idaapi.get_func_name(int(addr[2:], 16))))
+            self._bytestring_table.setItem(row, 2, qt.qtablewidgetitem()(bstr))
             self._bytestring_table.resizeRowToContents(row)
             row += 1
         self._bytestring_table.setSortingEnabled(True)
@@ -104,13 +105,13 @@ class TacoByteStrings(TacoTabWidget):
                         reg = reg[reg.find('['):]
                         if reg.count('+') == 0: offset = 0
                         else:
-                            ops = reg.split('+')
-                            reg = reg[:reg.find('+')]+']'
+                            #ops = reg.split('+')
+                            reg = reg[1:4]
                             offset = ctypes.c_int32(idc.GetOperandValue(head, 0)).value
-                            reg_base = 0
-                            if len(ops) > 2 and ops[1].endswith('h'):
-                                reg_base = int(ops[1][:-1], 16)
-                            offset -= reg_base
+                            #reg_base = 0
+                            #if len(ops) > 2 and ops[1].endswith('h'):
+                            #    reg_base = int(ops[1][:-1], 16)
+                            #offset -= reg_base
                         if reg not in chr_vals: chr_vals[reg] = {}
                         chr_vals[reg][offset] = (head, chr(idc.GetOperandValue(head, 1)))
                     elif (idc.GetOpnd(head, 0).startswith('byte ptr') or idc.GetOpnd(head, 0).startswith('[e')) and idc.GetOpType(head, 1) == idc.o_reg and idc.GetOpnd(head, 1) in eightbit:
@@ -119,17 +120,53 @@ class TacoByteStrings(TacoTabWidget):
                         if reg.count('+') == 0:
                             offset = 0
                         else:
-                            ops = reg.split('+')
-                            reg = reg[:reg.find('+')]+']'
+                            #ops = reg.split('+')
+                            #reg = reg[:reg.find('+')]+']'
+                            reg = reg[1:4]
+
                             offset = ctypes.c_int32(idc.GetOperandValue(head, 0)).value
-                            reg_base = 0
-                            if len(ops) > 2 and ops[1].endswith('h'):
-                                reg_base = int(ops[1][:-1],16)
-                            offset -= reg_base
+                            #reg_base = 0
+                            #if len(ops) > 2 and ops[1].endswith('h'):
+                            #    reg_base = int(ops[1][:-1],16)
+                            #offset -= reg_base
 
                         if reg not in chr_vals:
                             chr_vals[reg] = {}
                         chr_vals[reg][offset] = (head, chr(eightbit[idc.GetOpnd(head, 1)]))
+                    elif idc.GetOpnd(head, 0).startswith('word ptr') and idc.GetOpType(head, 1) == idc.o_imm:
+                        val = idc.GetOperandValue(head, 1)
+                        chrs = "{:04x}".format(val).decode('hex')[::-1]
+                        reg = idc.GetOpnd(head, 0)
+                        reg = reg[reg.find('[')+1:]
+                        reg = reg[:3]
+                        offset = ctypes.c_int32(idc.GetOperandValue(head, 0)).value
+                        if reg not in chr_vals:
+                            chr_vals[reg] = {}
+                        for c in chrs:
+                            chr_vals[reg][offset] = (head, c)
+                            offset += 1
+                    elif idc.GetOpType(head, 1) == idc.o_imm:
+                        val = idc.GetOperandValue(head, 1)
+                        chrs = "{:08x}".format(val).decode('hex')[::-1]
+                        #if val < 0xffff:
+                        #    continue
+                        badchar = False
+                        for c in chrs:
+                            if ord(c) not in [0x0, 0xa, 0xd] and (ord(c) < 0x20 or ord(c) > 0x80):
+                                badchar = True
+                                break
+                        if badchar:
+                            continue
+                        reg = idc.GetOpnd(head, 0)
+                        reg = reg[reg.find('[')+1:]
+                        reg = reg[:3]
+                        offset = ctypes.c_int32(idc.GetOperandValue(head, 0)).value
+                        if reg not in chr_vals:
+                            chr_vals[reg] = {}
+                        for c in chrs:
+                            chr_vals[reg][offset] = (head, c)
+                            offset += 1
+
             for reg, c_v in chr_vals.items():
                 keys = c_v.keys()
                 keys.sort()
@@ -141,10 +178,10 @@ class TacoByteStrings(TacoTabWidget):
                         addr = c_v[o][0]
                         offset = o
                         s = c_v[o][1]
-                    elif last + 1 == o and c_v[o] != '\x00':
+                    elif last + 1 == o and c_v[o][1] != '\x00':
                         s += c_v[o][1]
                     else:
-                        if s != "" and len(s) > 3:
+                        if s != "" and len(s) >= 5:
                             self.byte_strings["0x%X" % addr] = s
                             func = idaapi.get_func(addr)
                             if offset > 0:
@@ -155,13 +192,13 @@ class TacoByteStrings(TacoTabWidget):
                         offset = o
                         addr = c_v[o][0]
                     last = o
-                if s != "" and len(s) > 1:
+                if s != "" and len(s) >= 5:
                     self.byte_strings["0x%X" % addr] = s
                     func = idaapi.get_func(addr)
 
     def getTacoTab(self):
-        taco_tab = QtGui.QWidget()
-        layout = QtGui.QVBoxLayout()
+        taco_tab = qt.qwidget()()
+        layout = qt.qvboxlayout()()
         layout.addWidget(self)
         taco_tab.setLayout(layout)
         return taco_tab, self.name
